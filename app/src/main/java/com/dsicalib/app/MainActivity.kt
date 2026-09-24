@@ -19,6 +19,16 @@ class MainActivity : Activity() {
         setContentView(dsiView)
     }
 
+    override fun onResume() {
+        super.onResume()
+        dsiView.startSensors()
+    }
+
+    override fun onPause() {
+        dsiView.stopSensors()
+        super.onPause()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()

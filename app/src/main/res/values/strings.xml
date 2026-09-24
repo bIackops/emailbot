@@ -10,11 +10,18 @@
     <string name="ok">OK</string>
     <string name="retry">Retry</string>
 
-    <string name="menu_text">Calibrate the Touch Screen if it is not responding correctly to the stylus. Your accuracy is measured every time.</string>
+    <string name="menu_text">Calibrate the Touch Screen if it is not responding correctly to the stylus. Your accuracy is measured every time.\n\nTip: shake the device to use the motion pointer.</string>
     <string name="last_result">Last result: %1$d pts (Grade %2$c)</string>
     <string name="target_text">Touch the center of each mark as accurately as possible.</string>
+    <string name="target_text_pointer">Aim at the center of each mark and tap the screen as accurately as possible.</string>
     <string name="failed_text">The Touch Screen could not be calibrated.\n\nTouch the center of each mark as accurately as possible, then try again.</string>
     <string name="test_text">Touch the screen to check the calibration. If the mark does not appear where you touch, tap Retry.</string>
+
+    <string name="results_pointer">Results · Pointer</string>
+    <string name="pointer_on">Pointer ON. Tilt to aim, tap anywhere to select. Shake again to turn it off.</string>
+    <string name="pointer_off">Pointer OFF.</string>
+    <string name="no_gyro">This device has no gyroscope, so the motion pointer is not available.</string>
+    <string name="pointer_badge">POINTER</string>
 
     <string name="precision">PRECISION</string>
     <string name="new_record">New record!</string>

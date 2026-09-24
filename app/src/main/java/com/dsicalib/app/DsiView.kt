@@ -10,6 +10,10 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.SystemClock
@@ -29,8 +33,11 @@ import kotlin.math.sin
  * A single DS-style screen, drawn at a low native resolution (about 256 px wide) and
  * scaled up with nearest-neighbour filtering to fill the phone. Runs the System
  * Settings > Touch Screen calibration flow and shows accuracy stats afterwards.
+ *
+ * Shaking the device toggles a motion pointer: the gyroscope aims a hand cursor and
+ * tapping anywhere acts as a touch at the cursor.
  */
-class DsiView(context: Context) : View(context) {
+class DsiView(context: Context) : View(context), SensorEventListener {
 
     private enum class State { MENU, TARGET, FAILED, TEST, RESULTS, RECORDS }
 
@@ -113,6 +120,20 @@ class DsiView(context: Context) : View(context) {
         null
     }
 
+    // Motion pointer.
+    private val sensors = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager?
+    private val accelerometer = sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val gyroscope = sensors?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+    private val shake = ShakeDetector()
+    private val pointer = GyroPointer()
+    private var pointerOn = false
+    private var fingerDown = false
+    private var lastGyroNs = 0L
+    private var runWithPointer = false
+    private var resultsWithPointer = false
+    private var banner: String? = null
+    private var bannerUntil = 0L
+
     init {
         enter(State.MENU)
     }
@@ -133,6 +154,7 @@ class DsiView(context: Context) : View(context) {
         testMark = null
         targetHeld = false
         if (s == State.TARGET) {
+            runWithPointer = pointerOn
             taken.clear()
             lastHit = null
             targetShownAt = stateSince
@@ -165,8 +187,12 @@ class DsiView(context: Context) : View(context) {
     private fun confirmCalibration() {
         val cal = pending ?: return
         val stats = pendingStats ?: return
-        calibration = cal
-        prefs.edit().putString(KEY_CALIBRATION, cal.encode()).apply()
+        // A pointer run measures aim, not the touch screen, so it is scored but not applied.
+        if (!runWithPointer) {
+            calibration = cal
+            prefs.edit().putString(KEY_CALIBRATION, cal.encode()).apply()
+        }
+        resultsWithPointer = runWithPointer
         results = stats
         newBest = recordResult(stats)
         enter(State.RESULTS)
@@ -221,7 +247,7 @@ class DsiView(context: Context) : View(context) {
     private fun layout() {
         val body = when (state) {
             State.MENU -> str(R.string.menu_text)
-            State.TARGET -> str(R.string.target_text)
+            State.TARGET -> str(if (pointerOn) R.string.target_text_pointer else R.string.target_text)
             State.FAILED -> str(R.string.failed_text)
             State.TEST -> str(R.string.test_text)
             State.RESULTS, State.RECORDS -> null
@@ -292,13 +318,28 @@ class DsiView(context: Context) : View(context) {
     // ---------------------------------------------------------------- input
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val raw = Pt((e.x - dst.left) / scale, (e.y - dst.top) / scale)
         val action = e.actionMasked
+        if (pointerOn) {
+            // The finger is the "A button"; where it lands does not matter, the cursor aims.
+            when (action) {
+                MotionEvent.ACTION_DOWN -> fingerDown = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> fingerDown = false
+            }
+            if (action != MotionEvent.ACTION_MOVE) handlePointer(action, pointer.pos, calibrated = false)
+        } else {
+            handlePointer(action, Pt((e.x - dst.left) / scale, (e.y - dst.top) / scale), calibrated = true)
+        }
+        invalidate()
+        return true
+    }
+
+    /** Routes a press/move/release at [raw] screen coordinates to the current state. */
+    private fun handlePointer(action: Int, raw: Pt, calibrated: Boolean) {
         if (state == State.TARGET) {
             handleTarget(action, raw)
         } else {
             val cal = if (state == State.TEST) pending ?: calibration else calibration
-            val p = cal.map(raw)
+            val p = if (calibrated) cal.map(raw) else raw
             handleButtons(action, p)
             if (state == State.TEST && pressed == null && area.contains(p.x, p.y) &&
                 (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE)
@@ -306,8 +347,61 @@ class DsiView(context: Context) : View(context) {
                 testMark = p
             }
         }
+    }
+
+    // ------------------------------------------------------- motion pointer
+
+    fun startSensors() {
+        val sm = sensors ?: return
+        accelerometer?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        gyroscope?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+    }
+
+    fun stopSensors() {
+        sensors?.unregisterListener(this)
+        lastGyroNs = 0L
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    override fun onSensorChanged(event: SensorEvent) {
+        val v = event.values
+        when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> if (shake.onReading(v[0], v[1], v[2], now())) togglePointer()
+            Sensor.TYPE_GYROSCOPE -> if (pointerOn) {
+                val dt = (event.timestamp - lastGyroNs) / 1e9f
+                if (lastGyroNs != 0L && dt > 0f && dt < 0.1f) {
+                    pointer.update(v[0], v[1], dt, lw / AIM_RANGE_RAD, lw, lh)
+                    // Holding the "button" while aiming drags, just like a held touch.
+                    if (fingerDown) handlePointer(MotionEvent.ACTION_MOVE, pointer.pos, calibrated = false)
+                    invalidate()
+                }
+                lastGyroNs = event.timestamp
+            }
+        }
+    }
+
+    private fun togglePointer() {
+        if (gyroscope == null) {
+            showBanner(str(R.string.no_gyro))
+            return
+        }
+        if (fingerDown) handlePointer(MotionEvent.ACTION_CANCEL, pointer.pos, calibrated = false)
+        fingerDown = false
+        pointerOn = !pointerOn
+        pointer.center(lw, lh)
+        lastGyroNs = 0L
+        beep(if (pointerOn) ToneGenerator.TONE_PROP_BEEP2 else ToneGenerator.TONE_PROP_ACK)
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        showBanner(str(if (pointerOn) R.string.pointer_on else R.string.pointer_off))
+        // A run mixes neither input: restart it with the new one.
+        if (state == State.TARGET) enter(State.TARGET) else invalidate()
+    }
+
+    private fun showBanner(message: String) {
+        banner = message
+        bannerUntil = now() + BANNER_MS
         invalidate()
-        return true
     }
 
     private fun handleTarget(action: Int, raw: Pt) {
@@ -366,6 +460,7 @@ class DsiView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        stopSensors()
         tone?.release()
     }
 
@@ -378,7 +473,7 @@ class DsiView(context: Context) : View(context) {
         canvas.drawBitmap(bmp, null, dst, blitPaint)
 
         val revealing = (state == State.RESULTS || state == State.RECORDS) && now() - stateSince < REVEAL_MS
-        if (state == State.TARGET || revealing) postInvalidateOnAnimation()
+        if (state == State.TARGET || revealing || now() < bannerUntil) postInvalidateOnAnimation()
     }
 
     private fun reveal(): Float {
@@ -396,7 +491,7 @@ class DsiView(context: Context) : View(context) {
         }
         val title = when (state) {
             State.MENU -> R.string.system_settings
-            State.RESULTS -> R.string.results
+            State.RESULTS -> if (resultsWithPointer) R.string.results_pointer else R.string.results
             State.RECORDS -> R.string.records
             else -> R.string.touch_screen
         }
@@ -411,6 +506,65 @@ class DsiView(context: Context) : View(context) {
         }
         if (state != State.TARGET) drawFooter(c)
         buttons.forEach { drawButton(c, it) }
+        if (pointerOn) drawPointerBadge(c)
+        drawBanner(c)
+        if (pointerOn) drawHand(c, pointer.x.roundToInt(), pointer.y.roundToInt(), fingerDown)
+    }
+
+    private fun drawPointerBadge(c: Canvas) {
+        val label = str(R.string.pointer_badge)
+        val w = small.measureText(label) + 8f
+        val r = RectF(lw - 4f - w, 5f, lw - 4f, HEADER_H - 6f)
+        fill.color = ACCENT
+        c.drawRoundRect(r, 3f, 3f, fill)
+        smallCenter.color = WHITE
+        c.drawText(label, r.centerX(), r.centerY() - (small.ascent() + small.descent()) / 2f, smallCenter)
+        smallCenter.color = TEXT_LIGHT
+    }
+
+    private fun drawBanner(c: Canvas) {
+        val message = banner ?: return
+        val left = bannerUntil - now()
+        if (left <= 0) {
+            banner = null
+            return
+        }
+        val lines = wrap(message, bold, lw - 2 * MARGIN - 2 * PAD)
+        val h = 2 * PAD + lines.size * bold.fontSpacing
+        val bottom = (if (state == State.TARGET) lh.toFloat() else lh - FOOTER_H) - MARGIN
+        val r = RectF(MARGIN, bottom - h, lw - MARGIN, bottom)
+        val alpha = (min(1f, left / 300f) * 255).toInt()
+        fill.color = BANNER
+        fill.alpha = alpha * 230 / 255
+        c.drawRoundRect(r, 8f, 8f, fill)
+        fill.alpha = 255
+        bold.color = WHITE
+        bold.alpha = alpha
+        var y = r.top + PAD
+        for (line in lines) {
+            c.drawText(line, r.left + PAD, y - bold.ascent(), bold)
+            y += bold.fontSpacing
+        }
+        bold.color = TEXT
+    }
+
+    /** Original pixel-art pointing hand; the fingertip is the hotspot. */
+    private fun drawHand(c: Canvas, hx: Int, hy: Int, pressed: Boolean) {
+        val left = hx - HAND_HOTSPOT_X
+        for ((row, pixels) in HAND.withIndex()) {
+            for ((col, ch) in pixels.withIndex()) {
+                val color = when (ch) {
+                    '#' -> HAND_OUTLINE
+                    'o' -> if (pressed) ACCENT_LIGHT else WHITE
+                    else -> continue
+                }
+                // Drop shadow first, then the pixel.
+                fill.color = SHADOW
+                c.drawRect((left + col + 1).toFloat(), (hy + row + 1).toFloat(), (left + col + 2).toFloat(), (hy + row + 2).toFloat(), fill)
+                fill.color = color
+                c.drawRect((left + col).toFloat(), (hy + row).toFloat(), (left + col + 1).toFloat(), (hy + row + 1).toFloat(), fill)
+            }
+        }
     }
 
     private fun drawGrid(c: Canvas) {
@@ -798,6 +952,30 @@ class DsiView(context: Context) : View(context) {
         private const val MAP_VECTOR = 10f
 
         private const val HIT_MS = 250L
+        private const val BANNER_MS = 2500L
+
+        /** Rotation (radians) that sweeps the cursor across the full screen width. */
+        private const val AIM_RANGE_RAD = 0.7f
+
+        private const val HAND_HOTSPOT_X = 4
+        private val HAND = listOf(
+            "....##........",
+            "...#oo#.......",
+            "...#oo#.......",
+            "...#oo#.......",
+            "...#oo###.....",
+            "...#oo#oo##...",
+            ".###oo#oo#o##.",
+            "#oo#oooooooo#.",
+            "#ooooooooooo#.",
+            ".#oooooooooo#.",
+            ".#oooooooooo#.",
+            "..#ooooooooo#.",
+            "..#oooooooo#..",
+            "...#ooooooo#..",
+            "...#ooooooo#..",
+            "...#########..",
+        )
         private const val REVEAL_MS = 900L
         private const val HISTORY_SIZE = 10
 
@@ -827,5 +1005,8 @@ class DsiView(context: Context) : View(context) {
         private const val GOLD = 0xFFE8B21E.toInt()
         private const val GREEN = 0xFF3DB86A.toInt()
         private const val ORANGE = 0xFFF08C28.toInt()
+        private const val BANNER = 0xFF2B3A48.toInt()
+        private const val HAND_OUTLINE = 0xFF1E3A5F.toInt()
+        private const val SHADOW = 0x40000000
     }
 }

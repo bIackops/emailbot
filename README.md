@@ -26,6 +26,12 @@ assets: every graphic is drawn in code, and the sounds are system tones.
   - The correction applied (shift, scale, rotation)
 - **Records:** number of calibrations, best and last score, best average error, and
   a bar chart of your last 10 scores.
+- **Motion pointer:** shake the phone to switch on a Wii-remote-style hand cursor.
+  Tilt the phone to aim (the gyroscope drives it), and tap anywhere on the screen
+  to "press" at the cursor. Hold the tap while aiming to drag. It works everywhere,
+  including in the calibration, which then scores your aim. A pointer run is scored
+  and saved to Records, but it does not change the touch calibration. Shake again
+  to switch it off.
 - The saved calibration is a real least-squares correction, applied to every later
   touch in the app.
 
