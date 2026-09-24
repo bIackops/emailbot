@@ -4,13 +4,55 @@
 
     <string name="system_settings">System Settings</string>
     <string name="touch_screen">Touch Screen</string>
+    <string name="records">Records</string>
+    <string name="results">Results</string>
     <string name="back">Back</string>
     <string name="ok">OK</string>
     <string name="retry">Retry</string>
 
-    <string name="menu_text">Calibrate the Touch Screen if it is not responding correctly to the stylus.</string>
-    <string name="target_text">Touch the center of the mark with the stylus.\n\nTouch it as accurately as possible.</string>
+    <string name="menu_text">Calibrate the Touch Screen if it is not responding correctly to the stylus. Your accuracy is measured every time.</string>
+    <string name="last_result">Last result: %1$d pts (Grade %2$c)</string>
+    <string name="target_text">Touch the center of each mark as accurately as possible.</string>
     <string name="failed_text">The Touch Screen could not be calibrated.\n\nTouch the center of each mark as accurately as possible, then try again.</string>
-    <string name="test_text">Touch the screen to check the calibration.\n\nIf the mark does not appear where you touch, tap Retry.</string>
-    <string name="done_text">The Touch Screen has been calibrated.</string>
+    <string name="test_text">Touch the screen to check the calibration. If the mark does not appear where you touch, tap Retry.</string>
+
+    <string name="precision">PRECISION</string>
+    <string name="new_record">New record!</string>
+    <string name="best_score">Best: %1$d</string>
+    <string name="touch_map">TOUCH MAP · errors ×%1$d</string>
+    <string name="stat_avg_error">Average error</string>
+    <string name="stat_worst">Worst point</string>
+    <string name="stat_speed">Speed</string>
+    <string name="stat_steadiness">Steadiness</string>
+    <string name="stat_consistency">Consistency</string>
+    <string name="stat_tendency">Tendency</string>
+    <string name="stat_correction">Correction</string>
+    <string name="stat_scale">Scale · Rotation</string>
+    <string name="centered">Centered</string>
+
+    <string name="rec_count">Calibrations</string>
+    <string name="rec_best">Best score</string>
+    <string name="rec_last">Last score</string>
+    <string name="rec_best_error">Best average error</string>
+    <string name="recent_scores">RECENT SCORES</string>
+    <string name="no_records">No records yet.\n\nCalibrate the Touch Screen to see your results here.</string>
+
+    <string-array name="target_names">
+        <item>Top left</item>
+        <item>Bottom right</item>
+        <item>Top right</item>
+        <item>Bottom left</item>
+        <item>Center</item>
+    </string-array>
+
+    <string-array name="directions">
+        <item>right</item>
+        <item>down-right</item>
+        <item>down</item>
+        <item>down-left</item>
+        <item>left</item>
+        <item>up-left</item>
+        <item>up</item>
+        <item>up-right</item>
+    </string-array>
 </resources>

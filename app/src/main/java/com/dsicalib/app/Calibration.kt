@@ -1,8 +1,13 @@
 package com.dsicalib.app
 
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
+import kotlin.math.sqrt
 
 data class Pt(val x: Float, val y: Float)
+
+fun dist(a: Pt, b: Pt) = hypot(a.x - b.x, a.y - b.y)
 
 /**
  * Affine map from raw touch coordinates to screen coordinates:
@@ -14,6 +19,18 @@ data class Calibration(
     val d: Float, val e: Float, val f: Float,
 ) {
     fun map(p: Pt) = Pt(a * p.x + b * p.y + c, d * p.x + e * p.y + f)
+
+    /** Overall scale of the correction (1 = unchanged size). */
+    val scale: Float get() = sqrt(abs(a * e - b * d))
+
+    /** Rotation of the correction in degrees. */
+    val rotationDeg: Float get() = Math.toDegrees(atan2((d - b).toDouble(), (a + e).toDouble())).toFloat()
+
+    /** How far the correction moves a touch at [p]. */
+    fun shiftAt(p: Pt): Pt {
+        val q = map(p)
+        return Pt(q.x - p.x, q.y - p.y)
+    }
 
     fun encode() = listOf(a, b, c, d, e, f).joinToString(",")
 
@@ -29,27 +46,46 @@ data class Calibration(
             return Calibration(v[0], v[1], v[2], v[3], v[4], v[5])
         }
 
-        /** Solves the affine map that sends the three [raw] points onto the three [target] points. */
-        fun solve(raw: List<Pt>, target: List<Pt>): Calibration? {
-            require(raw.size == 3 && target.size == 3)
-            val x0 = raw[0].x.toDouble(); val y0 = raw[0].y.toDouble()
-            val x1 = raw[1].x.toDouble(); val y1 = raw[1].y.toDouble()
-            val x2 = raw[2].x.toDouble(); val y2 = raw[2].y.toDouble()
-
-            val det = x0 * (y1 - y2) - y0 * (x1 - x2) + (x1 * y2 - x2 * y1)
-            if (abs(det) < MIN_DET) return null
-
-            // Cramer's rule for [x y 1] * [p q r]^T = t, once per output axis.
-            fun axis(t0: Double, t1: Double, t2: Double): Triple<Float, Float, Float> {
-                val p = t0 * (y1 - y2) - y0 * (t1 - t2) + (t1 * y2 - t2 * y1)
-                val q = x0 * (t1 - t2) - t0 * (x1 - x2) + (x1 * t2 - x2 * t1)
-                val r = x0 * (y1 * t2 - y2 * t1) - y0 * (x1 * t2 - x2 * t1) + t0 * (x1 * y2 - x2 * y1)
-                return Triple((p / det).toFloat(), (q / det).toFloat(), (r / det).toFloat())
+        /**
+         * Least-squares affine map sending the [raw] points onto the [target] points.
+         * Exact for three points; with more it is the best fit. Null if the points are
+         * (nearly) collinear.
+         */
+        fun fit(raw: List<Pt>, target: List<Pt>): Calibration? {
+            require(raw.size == target.size && raw.size >= 3)
+            var sxx = 0.0; var sxy = 0.0; var syy = 0.0; var sx = 0.0; var sy = 0.0
+            var sxu = 0.0; var syu = 0.0; var su = 0.0
+            var sxv = 0.0; var syv = 0.0; var sv = 0.0
+            for (i in raw.indices) {
+                val x = raw[i].x.toDouble(); val y = raw[i].y.toDouble()
+                val u = target[i].x.toDouble(); val v = target[i].y.toDouble()
+                sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y
+                sxu += x * u; syu += y * u; su += u
+                sxv += x * v; syv += y * v; sv += v
             }
+            val n = raw.size.toDouble()
 
-            val (a, b, c) = axis(target[0].x.toDouble(), target[1].x.toDouble(), target[2].x.toDouble())
-            val (d, e, f) = axis(target[0].y.toDouble(), target[1].y.toDouble(), target[2].y.toDouble())
+            // Normal equations N * [p q r]^T = rhs, with N = AᵀA for rows [x y 1].
+            // det(N) is the sum of squared triangle determinants, so square the threshold.
+            val det = det3(sxx, sxy, sx, sxy, syy, sy, sx, sy, n)
+            if (abs(det) < MIN_DET * MIN_DET) return null
+
+            // Cramer's rule, once per output axis.
+            fun axis(bx: Double, by: Double, b1: Double) = Triple(
+                (det3(bx, sxy, sx, by, syy, sy, b1, sy, n) / det).toFloat(),
+                (det3(sxx, bx, sx, sxy, by, sy, sx, b1, n) / det).toFloat(),
+                (det3(sxx, sxy, bx, sxy, syy, by, sx, sy, b1) / det).toFloat(),
+            )
+
+            val (a, b, c) = axis(sxu, syu, su)
+            val (d, e, f) = axis(sxv, syv, sv)
             return Calibration(a, b, c, d, e, f)
         }
+
+        private fun det3(
+            a11: Double, a12: Double, a13: Double,
+            a21: Double, a22: Double, a23: Double,
+            a31: Double, a32: Double, a33: Double,
+        ) = a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31)
     }
 }
