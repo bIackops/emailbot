@@ -20,10 +20,15 @@ assets: every graphic is drawn in code, and the sounds are system tones.
 
 ## Getting the APK
 
-Every push runs GitHub Actions (`.github/workflows/build.yml`), which runs the
-unit tests and builds a debug APK. Open the workflow run and download the
-`dsi-touch-calibration-apk` artifact, then install it on your phone. You may
-need to allow installs from unknown sources.
+On your Android phone, open this link to download the app:
+
+https://github.com/bIackops/emailbot/releases/download/latest/DSi-Touch-Calibration.apk
+
+Then open the downloaded file to install it. If Android blocks it, allow your
+browser to "install unknown apps" when prompted.
+
+The link always points at the newest build: every push rebuilds the app on
+GitHub Actions (`.github/workflows/build.yml`) and replaces the file.
 
 ## Building locally
 

@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,3 +28,17 @@ jobs:
         with:
           name: dsi-touch-calibration-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      # Publishes the APK at a fixed link:
+      # https://github.com/<owner>/<repo>/releases/download/latest/DSi-Touch-Calibration.apk
+      - name: Publish APK to the "latest" release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk DSi-Touch-Calibration.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest DSi-Touch-Calibration.apk \
+            --target "$GITHUB_SHA" \
+            --title "DSi Touch Calibration (latest build)" \
+            --notes "Tap DSi-Touch-Calibration.apk below on your Android phone to download it, then open it to install."
